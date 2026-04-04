@@ -4,7 +4,7 @@ import io
 gi.require_version('Gtk', '3.0')
 # 1. Added Gdk to the imports for EventMask and Cursors
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
-from PIL import Image, ImageFilter, ImageEnhance, ImageOps
+from PIL import Image, ImageFilter, ImageEnhance, ImageOps, ExifTags
 
 GLib.set_prgname("Gtk Image Viewer")
 GLib.set_application_name("Gtk Image Viewer")
@@ -119,7 +119,16 @@ class ImageEditor(Gtk.Window):
             item.connect("activate", action)
             enhance_menu.append(item)
 
-        # 6. About Menu
+        #6. Info Menu
+        info_menu = Gtk.Menu()
+        info_item = Gtk.MenuItem(label='Info')
+        info_item.set_submenu(info_menu)
+
+        exif_info = Gtk.MenuItem(label="Exif Info")
+        exif_info.connect('activate', self.exif_info)
+        info_menu.append(exif_info)
+
+        # 7. About Menu
         about_menu = Gtk.Menu()
         about_item = Gtk.MenuItem(label='About')
         about_item.set_submenu(about_menu)
@@ -134,6 +143,7 @@ class ImageEditor(Gtk.Window):
         menubar.append(edit_item)
         menubar.append(filter_item)
         menubar.append(enhance_item)
+        menubar.append(info_item)
         menubar.append(about_item)
         self.main_box.pack_start(menubar, False, False, 0)
 
@@ -165,10 +175,15 @@ class ImageEditor(Gtk.Window):
 
     def pil_to_pixbuf(self, pil_image):
         buffer = io.BytesIO()
+
+        # Keep PNG to preserve alpha
         pil_image.save(buffer, format="PNG")
+        buffer.seek(0)
+
         loader = GdkPixbuf.PixbufLoader.new_with_type("png")
-        loader.write(buffer.getvalue())
+        loader.write(buffer.read())
         loader.close()
+
         return loader.get_pixbuf()
 
     def update_display(self):
@@ -261,7 +276,7 @@ class ImageEditor(Gtk.Window):
         dialog.set_website("https://github.com/fabv12610/GtkImageViewer")
         dialog.set_website_label("Gtk Image Viewer")
         dialog.set_authors(["Fabian Binu"])
-        # dialog.set_logo(GdkPixbuf.Pixbuf.new_from_file_at_size("./resources/icon.png", 64, 64)) # Disabled to ensure it runs without the local icon
+        dialog.set_logo(GdkPixbuf.Pixbuf.new_from_file_at_size("./resources/icon.png", 64, 64)) # Disabled to ensure it runs without the local icon
         dialog.connect('response', lambda dialog, data: dialog.destroy())
         dialog.show_all()
 
@@ -370,6 +385,57 @@ class ImageEditor(Gtk.Window):
         self.current_image = enhancer.enhance(factor)
         self.update_display()
 
+    # --- Image Info ---
+    def exif_info(self, widget):
+        if not self.current_image:
+            return
+
+        exif = self.current_image.getexif()
+
+        if not exif:
+            text = "No EXIF data found"
+        else:
+            lines = []
+            for tag_id, value in exif.items():
+                tag = ExifTags.TAGS.get(tag_id, tag_id)
+                lines.append(f"{tag}: {value}")
+            text = "\n".join(lines)
+
+        # Create dialog
+        dialog = Gtk.Dialog(
+            title="EXIF Info Viewer",
+            transient_for=self,
+            flags=0
+        )
+        dialog.set_default_size(500, 400)
+
+        # Add close button
+        dialog.add_button("Close", Gtk.ResponseType.CLOSE)
+
+        # Create scrollable area
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+
+        # Create text view
+        textview = Gtk.TextView()
+        textview.set_editable(False)
+        textview.set_cursor_visible(False)
+        textview.set_monospace(True)
+
+        buffer = textview.get_buffer()
+        buffer.set_text(text)
+
+        scrolled.add(textview)
+        scrolled.set_hexpand(True)
+        scrolled.set_vexpand(True)
+
+        # Add to dialog
+        box = dialog.get_content_area()
+        box.add(scrolled)
+
+        dialog.show_all()
+        dialog.run()
+        dialog.destroy()
 
 if __name__ == "__main__":
     win = ImageEditor()
