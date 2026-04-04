@@ -1,3 +1,5 @@
+import io
+
 import gi
 import matplotlib
 matplotlib.use('GTK3Agg')
@@ -200,7 +202,8 @@ class ImageEditor(Gtk.Window):
 
         return loader.get_pixbuf()
 
-    def fit_to_window(self):
+    def fit_to_window(self, widget=None, allocation=None):
+
         """Calculates the initial zoom factor to fit the image in the window."""
         if not self.current_image:
             return
@@ -223,7 +226,7 @@ class ImageEditor(Gtk.Window):
         """Draws the image strictly based on the current self.zoom_factor."""
         if not self.current_image:
             return
-
+        image = getattr(self, "display_image", self.current_image)
         img = self.current_image
         img_width, img_height = img.size
 
@@ -374,21 +377,25 @@ class ImageEditor(Gtk.Window):
         if self.current_image:
             w, h = self.current_image.size
             self.current_image = self.current_image.crop((w / 4, h / 4, 3 * w / 4, 3 * h / 4))
+            self.update_histogram_data()
             self.update_display()
 
     def on_resize(self, widget, allocation):
         if self.current_image:
+            self.update_histogram_data()
             self.update_display()
 
     # --- Filters ---
     def apply_filter(self, img_filter):
         if self.current_image:
             self.current_image = self.current_image.filter(img_filter)
+            self.update_histogram_data()
             self.update_display()
 
     def on_bw(self, widget):
         if self.current_image:
             self.current_image = self.current_image.convert("L")
+            self.update_histogram_data()
             self.update_display()
 
     def on_invert(self, widget):
@@ -401,22 +408,28 @@ class ImageEditor(Gtk.Window):
                 self.current_image = Image.merge('RGBA', (r2, g2, b2, a))
             else:
                 self.current_image = ImageOps.invert(self.current_image.convert('RGB'))
+            self.update_histogram_data()
             self.update_display()
 
     def on_blur(self, widget):
         self.apply_filter(ImageFilter.BLUR)
+        self.update_histogram_data()
 
     def on_sharpen(self, widget):
         self.apply_filter(ImageFilter.SHARPEN)
+        self.update_histogram_data()
 
     def on_edges(self, widget):
         self.apply_filter(ImageFilter.FIND_EDGES)
+        self.update_histogram_data()
 
     def on_emboss(self, widget):
         self.apply_filter(ImageFilter.EMBOSS)
+        self.update_histogram_data()
 
     def on_contour(self, widget):
         self.apply_filter(ImageFilter.CONTOUR)
+        self.update_histogram_data()
 
     # --- Enhancements ---
     def on_enhance(self, mode, factor):
@@ -428,6 +441,7 @@ class ImageEditor(Gtk.Window):
         elif mode == 'color':
             enhancer = ImageEnhance.Color(self.current_image)
         self.current_image = enhancer.enhance(factor)
+        self.update_histogram_data()
         self.update_display()
 
     # --- Image Info ---
@@ -551,42 +565,65 @@ class ImageEditor(Gtk.Window):
         dialog.destroy()
 
     def histogram(self, widget):
-        # 1. Efficiently convert PIL image to NumPy for channel slicing
-        # Assuming self.current_image is an RGB PIL Image
+        # 1. If already open, just bring it to front and update
+        if hasattr(self, 'hist_dialog') and self.hist_dialog:
+            self.update_histogram_data()
+            self.hist_dialog.present()
+            return
+
+        # 2. Create Non-Modal Dialog
+        self.hist_dialog = Gtk.Dialog(title="Image Histogram", transient_for=self, flags=0)
+        self.hist_dialog.add_button(Gtk.STOCK_CLOSE, Gtk.ResponseType.CLOSE)
+        self.hist_dialog.set_default_size(700, 500)
+
+        # 3. Setup Matplotlib Objects
+        self.hist_fig = Figure(figsize=(6, 4), dpi=100)
+        self.hist_ax = self.hist_fig.add_subplot(111)
+        self.hist_canvas = FigureCanvas(self.hist_fig)
+
+        self.hist_dialog.get_content_area().pack_start(self.hist_canvas, True, True, 0)
+
+        # 4. Handle Closing (Cleanup references)
+        def on_close(d, r):
+            self.hist_dialog.destroy()
+            self.hist_dialog = None
+            self.hist_ax = None
+
+        self.hist_dialog.connect("response", on_close)
+
+        # 5. Initial Draw
+        self.update_histogram_data()
+        self.hist_dialog.show_all()
+
+    def update_histogram_data(self):
+        if not hasattr(self, 'hist_ax') or self.hist_ax is None:
+            return
+
         img_data = np.array(self.current_image)
+        self.hist_ax.clear()
 
-        # 2. Setup the GTK Dialog
-        dialog = Gtk.Dialog(title="RGB Color Distribution", transient_for=self, flags=0)
-        dialog.set_modal(False)
-        dialog.add_button(Gtk.STOCK_CLOSE, Gtk.ResponseType.CLOSE)
-        dialog.set_default_size(700, 500)
+        # Case 1: Grayscale
+        if img_data.ndim == 2:
+            self.hist_ax.hist(img_data.ravel(), bins=255, range=(0, 255),
+                              color="black", alpha=0.7, histtype="stepfilled", label="Grayscale")
+            self.hist_ax.set_title("Grayscale Intensity Histogram")
 
-        # 3. Create Matplotlib Figure (Object-Oriented API)
-        fig = Figure(figsize=(6, 4), dpi=100)
-        ax = fig.add_subplot(111)
+        # Case 2: RGB / RGBA
+        else:
+            colors = [("Red", "red", 0), ("Green", "green", 1), ("Blue", "blue", 2)]
+            for label, color_code, idx in colors:
+                if img_data.shape[2] > idx:
+                    channel = img_data[:, :, idx].ravel()
+                    self.hist_ax.hist(channel, bins=255, range=(0, 255), color=color_code,
+                                      alpha=0.4, label=label, histtype="stepfilled")
+            self.hist_ax.set_title("RGB Intensity Histogram")
 
-        # 4. Extract and plot channels (Red=0, Green=1, Blue=2)
-        colors = [('Red', 'red', 0), ('Green', 'green', 1), ('Blue', 'blue', 2)]
+        self.hist_ax.set_xlabel("Intensity (0–255)")
+        self.hist_ax.set_ylabel("Pixel Count")
+        self.hist_ax.set_xlim(0, 255)
+        self.hist_ax.legend(loc="upper right")
 
-        for label, color_code, idx in colors:
-            # Flatten the 2D channel array into 1D for the histogram
-            channel = img_data[:, :, idx].ravel()
-            ax.hist(channel, bins=255, range=(0, 255),
-                    color=color_code, alpha=0.4, label=label, histtype='stepfilled')
-
-        ax.set_title('RGB Intensity Histogram')
-        ax.set_xlabel('Intensity (0-255)')
-        ax.set_ylabel('Pixel Count')
-        ax.legend(loc='upper right')
-        ax.set_xlim(0, 255)
-
-        # 5. Embed Canvas in Dialog
-        canvas = FigureCanvas(fig)
-        dialog.get_content_area().pack_start(canvas, True, True, 0)
-
-        dialog.show_all()
-        dialog.run()
-        dialog.destroy()
+        self.hist_canvas.draw()
 
 
 if __name__ == "__main__":
