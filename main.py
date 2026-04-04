@@ -1,12 +1,17 @@
 import gi
-import io
+import matplotlib
+matplotlib.use('GTK3Agg')
+from matplotlib.backends.backend_gtk3agg import FigureCanvasGTK3Agg as FigureCanvas
+from matplotlib.figure import Figure
+
 gi.require_version('Gtk', '3.0')
-# 1. Added Gdk to the imports for EventMask and Cursors
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
+import numpy as np
 from PIL import Image, ImageFilter, ImageEnhance, ImageOps, ExifTags
 
 #Risky if it's a bomb
 Image.MAX_IMAGE_PIXELS = None
+
 GLib.set_prgname("Gtk Image Viewer")
 GLib.set_application_name("Gtk Image Viewer")
 
@@ -60,7 +65,6 @@ class ImageEditor(Gtk.Window):
 
     def create_menubar(self):
         menubar = Gtk.MenuBar()
-
         # 1. File Menu
         file_menu = Gtk.Menu()
         file_item = Gtk.MenuItem(label="File")
@@ -131,7 +135,12 @@ class ImageEditor(Gtk.Window):
 
         exif_info = Gtk.MenuItem(label="Exif Info")
         exif_info.connect('activate', self.exif_info)
+
+        hist_info = Gtk.MenuItem(label='Histogram Info')
+        hist_info.connect('activate', self.histogram)
+
         info_menu.append(exif_info)
+        info_menu.append(hist_info)
 
         # 7. About Menu
         about_menu = Gtk.Menu()
@@ -540,6 +549,45 @@ class ImageEditor(Gtk.Window):
         dialog.show_all()
         dialog.run()
         dialog.destroy()
+
+    def histogram(self, widget):
+        # 1. Efficiently convert PIL image to NumPy for channel slicing
+        # Assuming self.current_image is an RGB PIL Image
+        img_data = np.array(self.current_image)
+
+        # 2. Setup the GTK Dialog
+        dialog = Gtk.Dialog(title="RGB Color Distribution", transient_for=self, flags=0)
+        dialog.set_modal(False)
+        dialog.add_button(Gtk.STOCK_CLOSE, Gtk.ResponseType.CLOSE)
+        dialog.set_default_size(700, 500)
+
+        # 3. Create Matplotlib Figure (Object-Oriented API)
+        fig = Figure(figsize=(6, 4), dpi=100)
+        ax = fig.add_subplot(111)
+
+        # 4. Extract and plot channels (Red=0, Green=1, Blue=2)
+        colors = [('Red', 'red', 0), ('Green', 'green', 1), ('Blue', 'blue', 2)]
+
+        for label, color_code, idx in colors:
+            # Flatten the 2D channel array into 1D for the histogram
+            channel = img_data[:, :, idx].ravel()
+            ax.hist(channel, bins=255, range=(0, 255),
+                    color=color_code, alpha=0.4, label=label, histtype='stepfilled')
+
+        ax.set_title('RGB Intensity Histogram')
+        ax.set_xlabel('Intensity (0-255)')
+        ax.set_ylabel('Pixel Count')
+        ax.legend(loc='upper right')
+        ax.set_xlim(0, 255)
+
+        # 5. Embed Canvas in Dialog
+        canvas = FigureCanvas(fig)
+        dialog.get_content_area().pack_start(canvas, True, True, 0)
+
+        dialog.show_all()
+        dialog.run()
+        dialog.destroy()
+
 
 if __name__ == "__main__":
 
