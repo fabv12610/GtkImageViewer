@@ -1,11 +1,12 @@
 import gi
 import io
-
 gi.require_version('Gtk', '3.0')
 # 1. Added Gdk to the imports for EventMask and Cursors
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
 from PIL import Image, ImageFilter, ImageEnhance, ImageOps, ExifTags
 
+#Risky if its a bomb
+Image.MAX_IMAGE_PIXELS = None
 GLib.set_prgname("Gtk Image Viewer")
 GLib.set_application_name("Gtk Image Viewer")
 
@@ -24,18 +25,20 @@ class ImageEditor(Gtk.Window):
         self.create_toolbar()
 
         self.scroll_window = Gtk.ScrolledWindow()
+        # Enable automatic scrollbars
+        self.scroll_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
 
-        # --- NEW: Added EventBox to capture mouse events ---
         self.event_box = Gtk.EventBox()
+
+        # CRITICAL FIX: Add with viewport so panning actually moves the canvas
         self.scroll_window.add(self.event_box)
 
         self.image_widget = Gtk.Image()
         self.event_box.add(self.image_widget)
-        # ---------------------------------------------------
 
         self.main_box.pack_start(self.scroll_window, True, True, 0)
 
-        # --- NEW: Dragging State Variables and Signals ---
+        # --- Dragging State Variables and Signals ---
         self.drag_in_progress = False
         self.start_x = 0
         self.start_y = 0
@@ -77,7 +80,7 @@ class ImageEditor(Gtk.Window):
         view_item.set_submenu(view_menu)
 
         for label, action in [("Zoom In (+20%)", self.on_zoom_in), ("Zoom Out (-20%)", self.on_zoom_out),
-                              ("Actual Size (100%)", self.on_zoom_reset)]:
+                              ("Actual Size (100%)", self.fit_to_window)]:
             item = Gtk.MenuItem(label=label)
             item.connect("activate", action)
             view_menu.append(item)
@@ -157,7 +160,7 @@ class ImageEditor(Gtk.Window):
             (None, None, None),  # Separator
             (Gtk.STOCK_ZOOM_IN, "Zoom In", self.on_zoom_in),
             (Gtk.STOCK_ZOOM_OUT, "Zoom Out", self.on_zoom_out),
-            (Gtk.STOCK_ZOOM_100, "Actual Size", self.on_zoom_reset),
+            (Gtk.STOCK_ZOOM_100, "Actual Size", self.fit_to_window),
             (None, None, None),
             (Gtk.STOCK_UNDO, "Rotate 90°", self.on_rotate)
         ]
@@ -186,18 +189,51 @@ class ImageEditor(Gtk.Window):
 
         return loader.get_pixbuf()
 
+    def fit_to_window(self):
+        """Calculates the initial zoom factor to fit the image in the window."""
+        if not self.current_image:
+            return
+
+        # Let the window draw first to get accurate dimensions,
+        # or fallback to default size if not fully realized
+        allocation = self.scroll_window.get_allocation()
+        max_width = allocation.width if allocation.width > 1 else 1024
+        max_height = allocation.height if allocation.height > 1 else 768
+
+        img_width, img_height = self.current_image.size
+
+        # Compute scale factor (fit to window with a slight margin)
+        scale_x = (max_width - 20) / img_width
+        scale_y = (max_height - 20) / img_height
+        self.zoom_factor = min(scale_x, scale_y)
+        self.update_display()
+
     def update_display(self):
-        if self.current_image:
-            # Apply zoom only to the display, not the actual underlying image data
-            display_w = max(1, int(self.current_image.width * self.zoom_factor))
-            display_h = max(1, int(self.current_image.height * self.zoom_factor))
+        """Draws the image strictly based on the current self.zoom_factor."""
+        if not self.current_image:
+            return
 
-            # Create a temporary scaled copy for the GTK View
-            display_img = self.current_image.resize((display_w, display_h), Image.Resampling.BILINEAR)
+        img = self.current_image
+        img_width, img_height = img.size
 
-            pixbuf = self.pil_to_pixbuf(display_img)
-            self.image_widget.set_from_pixbuf(pixbuf)
+        # Resize image using the current manual or auto zoom factor
+        new_width = max(1, int(img_width * self.zoom_factor))
+        new_height = max(1, int(img_height * self.zoom_factor))
 
+        resized = img.resize((new_width, new_height), Image.LANCZOS)
+
+        # Convert to Pixbuf
+        pixbuf = GdkPixbuf.Pixbuf.new_from_data(
+            resized.tobytes(),
+            GdkPixbuf.Colorspace.RGB,
+            resized.mode == "RGBA",
+            8,
+            resized.width,
+            resized.height,
+            resized.width * len(resized.getbands())
+        )
+
+        self.image_widget.set_from_pixbuf(pixbuf)
     # --- NEW: Drag & Pan Logic ---
     def on_button_press(self, widget, event):
         if event.button == 1:
@@ -241,16 +277,27 @@ class ImageEditor(Gtk.Window):
     # --- Actions ---
 
     def on_open(self, widget):
-        dialog = Gtk.FileChooserDialog(title="Open Image", parent=self, action=Gtk.FileChooserAction.OPEN, )
-        dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OPEN, Gtk.ResponseType.OK)
+        dialog = Gtk.FileChooserDialog(
+            title="Open Image",
+            parent=self,
+            action=Gtk.FileChooserAction.OPEN,
+        )
+        dialog.add_buttons(
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+            Gtk.STOCK_OPEN, Gtk.ResponseType.OK
+        )
 
         if dialog.run() == Gtk.ResponseType.OK:
             self.current_image = Image.open(dialog.get_filename())
-            # Convert to RGB to ensure compatibility with all filters (especially if it was a palette image like GIF)
-            if self.current_image.mode != 'RGB' and self.current_image.mode != 'RGBA':
-                self.current_image = self.current_image.convert('RGB')
-            self.zoom_factor = 1.0
+
+            # Ensure compatible mode
+            if self.current_image.mode not in ("RGB", "RGBA"):
+                self.current_image = self.current_image.convert("RGB")
+
+            # Fit to window first, THEN update display
+            self.fit_to_window()
             self.update_display()
+
         dialog.destroy()
 
     def on_save(self, widget):
@@ -290,10 +337,6 @@ class ImageEditor(Gtk.Window):
         self.zoom_factor *= 0.8
         self.update_display()
 
-    def on_zoom_reset(self, widget):
-        self.zoom_factor = 1.0
-        self.update_display()
-
     # --- Editing & Transforms ---
     def on_rotate(self, widget):
         if self.current_image:
@@ -316,25 +359,9 @@ class ImageEditor(Gtk.Window):
             self.current_image = self.current_image.crop((w / 4, h / 4, 3 * w / 4, 3 * h / 4))
             self.update_display()
 
-    def on_resize(self, widget):
-        if not self.current_image: return
-        dialog = Gtk.Dialog(title="Resize", parent=self, flags=0)
-        dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK)
-        box = dialog.get_content_area()
-        w_entry, h_entry = Gtk.Entry(text=str(self.current_image.width)), Gtk.Entry(text=str(self.current_image.height))
-        box.add(Gtk.Label(label="Width:"))
-        box.add(w_entry)
-        box.add(Gtk.Label(label="Height:"))
-        box.add(h_entry)
-        dialog.show_all()
-        if dialog.run() == Gtk.ResponseType.OK:
-            try:
-                self.current_image = self.current_image.resize((int(w_entry.get_text()), int(h_entry.get_text())),
-                                                               Image.Resampling.LANCZOS)
-                self.update_display()
-            except ValueError:
-                pass
-        dialog.destroy()
+    def on_resize(self, widget, allocation):
+        if self.current_image:
+            self.update_display()
 
     # --- Filters ---
     def apply_filter(self, img_filter):
@@ -390,8 +417,6 @@ class ImageEditor(Gtk.Window):
     def exif_info(self, widget):
         if not self.current_image:
             return
-
-        from PIL import ExifTags
 
         exif = self.current_image.getexif()
 
@@ -509,6 +534,7 @@ class ImageEditor(Gtk.Window):
         dialog.destroy()
 
 if __name__ == "__main__":
+
     win = ImageEditor()
     win.connect("destroy", Gtk.main_quit)
     win.show_all()
