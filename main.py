@@ -2,18 +2,20 @@ import gi
 import io
 
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GdkPixbuf, GLib
+# 1. Added Gdk to the imports for EventMask and Cursors
+from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
 from PIL import Image, ImageFilter, ImageEnhance, ImageOps
 
 GLib.set_prgname("Gtk Image Viewer")
 GLib.set_application_name("Gtk Image Viewer")
+
 
 class ImageEditor(Gtk.Window):
     def __init__(self):
         super().__init__(title="Python GTK3 Ultimate Image Editor")
         self.set_default_size(1024, 768)
         self.current_image = None
-        self.zoom_factor = 1.0  # 1.0 = 100%
+        self.zoom_factor = 1.0
 
         self.main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.add(self.main_box)
@@ -22,9 +24,34 @@ class ImageEditor(Gtk.Window):
         self.create_toolbar()
 
         self.scroll_window = Gtk.ScrolledWindow()
+
+        # --- NEW: Added EventBox to capture mouse events ---
+        self.event_box = Gtk.EventBox()
+        self.scroll_window.add(self.event_box)
+
         self.image_widget = Gtk.Image()
-        self.scroll_window.add(self.image_widget)
+        self.event_box.add(self.image_widget)
+        # ---------------------------------------------------
+
         self.main_box.pack_start(self.scroll_window, True, True, 0)
+
+        # --- NEW: Dragging State Variables and Signals ---
+        self.drag_in_progress = False
+        self.start_x = 0
+        self.start_y = 0
+        self.start_h_adj = 0
+        self.start_v_adj = 0
+
+        self.event_box.add_events(
+            Gdk.EventMask.BUTTON_PRESS_MASK |
+            Gdk.EventMask.BUTTON_RELEASE_MASK |
+            Gdk.EventMask.POINTER_MOTION_MASK
+        )
+
+        self.event_box.connect("button-press-event", self.on_button_press)
+        self.event_box.connect("button-release-event", self.on_button_release)
+        self.event_box.connect("motion-notify-event", self.on_mouse_motion)
+        # ---------------------------------------------------
 
     # --- UI Setup ---
 
@@ -92,15 +119,16 @@ class ImageEditor(Gtk.Window):
             item.connect("activate", action)
             enhance_menu.append(item)
 
-        #6. About Menu
+        # 6. About Menu
         about_menu = Gtk.Menu()
         about_item = Gtk.MenuItem(label='About')
         about_item.set_submenu(about_menu)
 
         about = Gtk.MenuItem(label="About")
-        about_item.connect('activate', self.on_about)
+        about.connect('activate', self.on_about)
         about_menu.append(about)
 
+        # Adding to Menu
         menubar.append(file_item)
         menubar.append(view_item)
         menubar.append(edit_item)
@@ -155,11 +183,52 @@ class ImageEditor(Gtk.Window):
             pixbuf = self.pil_to_pixbuf(display_img)
             self.image_widget.set_from_pixbuf(pixbuf)
 
+    # --- NEW: Drag & Pan Logic ---
+    def on_button_press(self, widget, event):
+        if event.button == 1:
+            self.drag_in_progress = True
+            self.start_x = event.x_root
+            self.start_y = event.y_root
+
+            hadj = self.scroll_window.get_hadjustment()
+            vadj = self.scroll_window.get_vadjustment()
+            self.start_h_adj = hadj.get_value()
+            self.start_v_adj = vadj.get_value()
+
+            display = Gdk.Display.get_default()
+            cursor = Gdk.Cursor.new_from_name(display, "grabbing")
+            self.get_window().set_cursor(cursor)
+            return True
+        return False
+
+    def on_button_release(self, widget, event):
+        if event.button == 1:
+            self.drag_in_progress = False
+            self.get_window().set_cursor(None)
+            return True
+        return False
+
+    def on_mouse_motion(self, widget, event):
+        if self.drag_in_progress:
+            dx = event.x_root - self.start_x
+            dy = event.y_root - self.start_y
+
+            hadj = self.scroll_window.get_hadjustment()
+            vadj = self.scroll_window.get_vadjustment()
+
+            hadj.set_value(self.start_h_adj - dx)
+            vadj.set_value(self.start_v_adj - dy)
+            return True
+        return False
+
+    # -----------------------------
+
     # --- Actions ---
 
     def on_open(self, widget):
-        dialog = Gtk.FileChooserDialog("Open Image", self, Gtk.FileChooserAction.OPEN,
-                                       (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OPEN, Gtk.ResponseType.OK))
+        dialog = Gtk.FileChooserDialog(title="Open Image", parent=self, action=Gtk.FileChooserAction.OPEN, )
+        dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OPEN, Gtk.ResponseType.OK)
+
         if dialog.run() == Gtk.ResponseType.OK:
             self.current_image = Image.open(dialog.get_filename())
             # Convert to RGB to ensure compatibility with all filters (especially if it was a palette image like GIF)
@@ -174,19 +243,25 @@ class ImageEditor(Gtk.Window):
         dialog = Gtk.FileChooserDialog("Save Image", self, Gtk.FileChooserAction.SAVE,
                                        (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_SAVE, Gtk.ResponseType.OK))
         if dialog.run() == Gtk.ResponseType.OK:
-            self.current_image.save(dialog.get_filename())
+            filename = dialog.get_filename()
+
+            if not filename.lower().endswith((".png", ".jpg", ".jpeg")):
+                filename += ".png"  # default format
+
+            self.current_image.save(filename)
         dialog.destroy()
 
     def on_about(self, widget):
         dialog = Gtk.AboutDialog()
         dialog.set_title("AboutDialog")
         dialog.set_name("Gtk Image Viewer")
+        dialog.set_license_type(Gtk.License.GPL_2_0)
         dialog.set_version("1.0")
         dialog.set_comments("A Gtk based image viewer")
         dialog.set_website("https://github.com/fabv12610/GtkImageViewer")
         dialog.set_website_label("Gtk Image Viewer")
         dialog.set_authors(["Fabian Binu"])
-        dialog.set_logo(GdkPixbuf.Pixbuf.new_from_file_at_size("./resources/icon.png", 64, 64))
+        # dialog.set_logo(GdkPixbuf.Pixbuf.new_from_file_at_size("./resources/icon.png", 64, 64)) # Disabled to ensure it runs without the local icon
         dialog.connect('response', lambda dialog, data: dialog.destroy())
         dialog.show_all()
 
@@ -231,9 +306,9 @@ class ImageEditor(Gtk.Window):
         dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK)
         box = dialog.get_content_area()
         w_entry, h_entry = Gtk.Entry(text=str(self.current_image.width)), Gtk.Entry(text=str(self.current_image.height))
-        box.add(Gtk.Label(label="Width:"));
-        box.add(w_entry);
-        box.add(Gtk.Label(label="Height:"));
+        box.add(Gtk.Label(label="Width:"))
+        box.add(w_entry)
+        box.add(Gtk.Label(label="Height:"))
         box.add(h_entry)
         dialog.show_all()
         if dialog.run() == Gtk.ResponseType.OK:
@@ -295,7 +370,9 @@ class ImageEditor(Gtk.Window):
         self.current_image = enhancer.enhance(factor)
         self.update_display()
 
-win = ImageEditor()
-win.connect("destroy", Gtk.main_quit)
-win.show_all()
-Gtk.main()
+
+if __name__ == "__main__":
+    win = ImageEditor()
+    win.connect("destroy", Gtk.main_quit)
+    win.show_all()
+    Gtk.main()
