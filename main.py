@@ -5,7 +5,7 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
 from PIL import Image, ImageFilter, ImageEnhance, ImageOps, ExifTags
 
-#Risky if its a bomb
+#Risky if it's a bomb
 Image.MAX_IMAGE_PIXELS = None
 GLib.set_prgname("Gtk Image Viewer")
 GLib.set_application_name("Gtk Image Viewer")
@@ -117,7 +117,9 @@ class ImageEditor(Gtk.Window):
         for label, action in [("Brightness +20%", lambda x: self.on_enhance('brightness', 1.2)),
                               ("Brightness -20%", lambda x: self.on_enhance('brightness', 0.8)),
                               ("Contrast +20%", lambda x: self.on_enhance('contrast', 1.2)),
-                              ("Color +20%", lambda x: self.on_enhance('color', 1.2))]:
+                              ("Contrast -20%", lambda x: self.on_enhance('contrast', 0.8)),
+                              ("Color +20%", lambda x: self.on_enhance('color', 1.2)),
+                              ("Color -20%", lambda x: self.on_enhance('color', 0.8))]:
             item = Gtk.MenuItem(label=label)
             item.connect("activate", action)
             enhance_menu.append(item)
@@ -222,15 +224,21 @@ class ImageEditor(Gtk.Window):
 
         resized = img.resize((new_width, new_height), Image.LANCZOS)
 
-        # Convert to Pixbuf
+        # Force RGB if it's not already, to ensure 3 channels
+        if resized.mode != "RGB":
+            resized = resized.convert("RGB")
+
+        channels = 3  # Since we converted to RGB
+        rowstride = resized.width * channels
+
         pixbuf = GdkPixbuf.Pixbuf.new_from_data(
             resized.tobytes(),
             GdkPixbuf.Colorspace.RGB,
-            resized.mode == "RGBA",
+            False,  # has_alpha is False for RGB
             8,
             resized.width,
             resized.height,
-            resized.width * len(resized.getbands())
+            rowstride
         )
 
         self.image_widget.set_from_pixbuf(pixbuf)
