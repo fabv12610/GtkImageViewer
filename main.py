@@ -2,9 +2,11 @@ import gi
 import io
 
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GdkPixbuf
+from gi.repository import Gtk, GdkPixbuf, GLib
 from PIL import Image, ImageFilter, ImageEnhance, ImageOps
 
+GLib.set_prgname("Gtk Image Viewer")
+GLib.set_application_name("Gtk Image Viewer")
 
 class ImageEditor(Gtk.Window):
     def __init__(self):
@@ -95,6 +97,10 @@ class ImageEditor(Gtk.Window):
         about_item = Gtk.MenuItem(label='About')
         about_item.set_submenu(about_menu)
 
+        about = Gtk.MenuItem(label="About")
+        about_item.connect('activate', self.on_about)
+        about_menu.append(about)
+
         menubar.append(file_item)
         menubar.append(view_item)
         menubar.append(edit_item)
@@ -170,6 +176,19 @@ class ImageEditor(Gtk.Window):
         if dialog.run() == Gtk.ResponseType.OK:
             self.current_image.save(dialog.get_filename())
         dialog.destroy()
+
+    def on_about(self, widget):
+        dialog = Gtk.AboutDialog()
+        dialog.set_title("AboutDialog")
+        dialog.set_name("Gtk Image Viewer")
+        dialog.set_version("1.0")
+        dialog.set_comments("A Gtk based image viewer")
+        dialog.set_website("https://github.com/fabv12610/GtkImageViewer")
+        dialog.set_website_label("Gtk Image Viewer")
+        dialog.set_authors(["Fabian Binu"])
+        dialog.set_logo(GdkPixbuf.Pixbuf.new_from_file_at_size("./resources/icon.png", 64, 64))
+        dialog.connect('response', lambda dialog, data: dialog.destroy())
+        dialog.show_all()
 
     # --- Zoom Controls ---
     def on_zoom_in(self, widget):
@@ -275,9 +294,6 @@ class ImageEditor(Gtk.Window):
             enhancer = ImageEnhance.Color(self.current_image)
         self.current_image = enhancer.enhance(factor)
         self.update_display()
-
-
-
 
 win = ImageEditor()
 win.connect("destroy", Gtk.main_quit)
