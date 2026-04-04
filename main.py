@@ -255,8 +255,9 @@ class ImageEditor(Gtk.Window):
 
     def on_save(self, widget):
         if not self.current_image: return
-        dialog = Gtk.FileChooserDialog("Save Image", self, Gtk.FileChooserAction.SAVE,
-                                       (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_SAVE, Gtk.ResponseType.OK))
+        dialog = Gtk.FileChooserDialog(title="Save Image", parent=self, action=Gtk.FileChooserAction.SAVE)
+        dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_SAVE, Gtk.ResponseType.OK)
+
         if dialog.run() == Gtk.ResponseType.OK:
             filename = dialog.get_filename()
 
@@ -390,48 +391,118 @@ class ImageEditor(Gtk.Window):
         if not self.current_image:
             return
 
+        from PIL import ExifTags
+
         exif = self.current_image.getexif()
 
-        if not exif:
-            text = "No EXIF data found"
-        else:
-            lines = []
-            for tag_id, value in exif.items():
-                tag = ExifTags.TAGS.get(tag_id, tag_id)
-                lines.append(f"{tag}: {value}")
-            text = "\n".join(lines)
-
-        # Create dialog
         dialog = Gtk.Dialog(
             title="EXIF Info Viewer",
             transient_for=self,
             flags=0
         )
         dialog.set_default_size(500, 400)
-
-        # Add close button
         dialog.add_button("Close", Gtk.ResponseType.CLOSE)
 
-        # Create scrollable area
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-
-        # Create text view
-        textview = Gtk.TextView()
-        textview.set_editable(False)
-        textview.set_cursor_visible(False)
-        textview.set_monospace(True)
-
-        buffer = textview.get_buffer()
-        buffer.set_text(text)
-
-        scrolled.add(textview)
         scrolled.set_hexpand(True)
         scrolled.set_vexpand(True)
 
-        # Add to dialog
+        textview = Gtk.TextView()
+        textview.set_editable(False)
+        textview.set_cursor_visible(False)
+
+        buffer = textview.get_buffer()
+
+        # Tags
+        tag_header = buffer.create_tag(
+            "header",
+            weight=700,
+            scale=1.3
+        )
+
+        tag_key = buffer.create_tag(
+            "key",
+            weight=600
+        )
+
+        tag_value = buffer.create_tag(
+            "value",
+            family="monospace"
+        )
+
+        tag_spacing = buffer.create_tag(
+            "spacing",
+            scale=0.8
+        )
+
+        iter_ = buffer.get_start_iter()
+
+        def add_header(text):
+            buffer.insert_with_tags(iter_, text + "\n", tag_header)
+
+        def add_kv(key, value):
+            buffer.insert_with_tags(iter_, f"{key}: ", tag_key)
+            buffer.insert_with_tags(iter_, f"{value}\n", tag_value)
+
+        def add_space():
+            buffer.insert_with_tags(iter_, "\n", tag_spacing)
+
+        if not exif:
+            buffer.insert(iter_, "No EXIF data found")
+        else:
+            data = {}
+            for tag_id, value in exif.items():
+                tag = ExifTags.TAGS.get(tag_id, tag_id)
+                data[tag] = value
+
+            def fmt_fraction(val, suffix=""):
+                try:
+                    if isinstance(val, tuple):
+                        return f"{val[0] / val[1]:.1f}{suffix}"
+                    return f"{val}{suffix}"
+                except:
+                    return str(val)
+
+            def fmt_exposure(val):
+                try:
+                    if isinstance(val, tuple):
+                        return f"{val[0]}/{val[1]}s"
+                    return f"{val}s"
+                except:
+                    return str(val)
+
+            # Camera
+            add_header("Camera")
+            add_kv("Make", data.get("Make", "-"))
+            add_kv("Model", data.get("Model", "-"))
+            add_kv("Lens", data.get("LensModel", "-"))
+            add_space()
+
+            # Settings
+            add_header("Settings")
+            add_kv("ISO", data.get("ISOSpeedRatings", "-"))
+            add_kv("Aperture", "f/" + fmt_fraction(data.get("FNumber", "-")))
+            add_kv("Shutter", fmt_exposure(data.get("ExposureTime", "-")))
+            add_kv("Focal Length", fmt_fraction(data.get("FocalLength", "-"), "mm"))
+            add_space()
+
+            # Image
+            add_header("Image")
+            add_kv("Resolution", f"{self.current_image.width} x {self.current_image.height}")
+            add_kv("Color Mode", self.current_image.mode)
+            add_space()
+
+            # Date
+            add_header("Date")
+            add_kv("Taken", data.get("DateTimeOriginal", "-"))
+            add_kv("Modified", data.get("DateTime", "-"))
+
+        scrolled.add(textview)
+
         box = dialog.get_content_area()
-        box.add(scrolled)
+        box.set_border_width(6)
+        box.pack_start(scrolled, True, True, 0)
 
         dialog.show_all()
         dialog.run()
