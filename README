@@ -1,0 +1,143 @@
+# GTK Image Viewer
+
+A lightweight image viewer built with Python and GTK3, designed to handle large images while maintaining a simple and responsive interface.
+
+---
+
+## Features
+
+* Open and display images using a native GTK file picker
+* Automatic image scaling to fit the window
+* Maintains aspect ratio (no stretching)
+* Handles large images more efficiently with optimized resizing
+* Responsive UI with resize-aware rendering
+
+---
+
+## Technologies Used
+
+### Python 3
+
+Core programming language used for the application logic.
+
+### GTK3 (PyGObject)
+
+Provides the graphical user interface, including:
+
+* Window management
+* Layout containers
+* File chooser dialog
+* Image display widgets
+
+### Pillow
+
+Used for image processing tasks such as:
+
+* Loading images
+* Converting formats (RGB/RGBA)
+* Resizing and scaling
+
+### Pillow-SIMD (optional but recommended)
+
+A faster drop-in replacement for Pillow that accelerates image operations using CPU vector instructions.
+
+Best for:
+
+* Large image resizing
+* Improving UI responsiveness during scaling
+
+---
+
+## Performance Notes
+
+This application supports large images, but extremely high-resolution files (e.g., tens of thousands of pixels per dimension) can still be resource-intensive.
+
+Key considerations:
+
+* Large images are fully decoded into memory
+* Resizing very large images can be slow without optimization
+* Pillow-SIMD significantly improves resize performance
+
+For extremely large TIFF files, consider future improvements such as:
+
+* Lazy loading / tiling
+* Using more advanced libraries like libvips
+
+---
+
+## Installation
+
+### 1. Install system dependencies
+
+On Debian/Ubuntu-based systems:
+
+```bash
+sudo apt install python3 python3-gi python3-gi-cairo gir1.2-gtk-3.0 python3-pil
+```
+
+---
+
+### 2. (Recommended) Install Pillow-SIMD
+
+Remove the default Pillow:
+
+```bash
+pip uninstall pillow
+```
+
+Install optimized version:
+
+```bash
+CC="cc -mavx2" pip install --no-cache-dir pillow-simd
+```
+
+If your CPU does not support AVX2, install without the flag:
+
+```bash
+pip install pillow-simd
+```
+
+---
+
+### 3. Run the application
+
+```bash
+python3 main.py
+```
+
+---
+
+## Project Structure
+
+```
+.
+├── main.py
+├── README.md
+```
+
+---
+
+## Usage
+
+1. Launch the program
+2. Click "Open Image"
+3. Select an image file
+4. The image will automatically scale to fit the window
+
+Resizing the window will dynamically adjust the image size.
+
+---
+
+## Future Improvements
+
+* Smooth zoom (scroll wheel support)
+* Click-and-drag panning
+* Image centering within the window
+* GPU acceleration
+* Efficient handling of massive images (tiling/streaming)
+
+---
+
+## License
+
+This project is open-source and available under the GNU General License.
