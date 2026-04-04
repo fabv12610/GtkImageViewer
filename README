@@ -1,105 +1,87 @@
 # GTK Image Viewer
 
-A lightweight image viewer built with Python and GTK3, designed to handle large images while maintaining a simple and responsive interface.
+A simple, fast image viewer built with Python and GTK3. It focuses on handling large images more efficiently than typical basic viewers by automatically scaling them to fit the window.
+
+---
+
+## Preview
+
+Lightweight GTK interface with automatic image fitting and responsive resizing.
 
 ---
 
 ## Features
 
-* Open and display images using a native GTK file picker
-* Automatic image scaling to fit the window
-* Maintains aspect ratio (no stretching)
-* Handles large images more efficiently with optimized resizing
-* Responsive UI with resize-aware rendering
+* Open images with a native file dialog
+* Automatically fits images to the window
+* Maintains aspect ratio (no distortion)
+* Updates image size when the window is resized
+* Works with common formats (PNG, JPEG, TIFF, etc.)
+* Optimized for large images
 
 ---
 
-## Technologies Used
+## Tech Stack
 
-### Python 3
-
-Core programming language used for the application logic.
-
-### GTK3 (PyGObject)
-
-Provides the graphical user interface, including:
-
-* Window management
-* Layout containers
-* File chooser dialog
-* Image display widgets
-
-### Pillow
-
-Used for image processing tasks such as:
-
-* Loading images
-* Converting formats (RGB/RGBA)
-* Resizing and scaling
-
-### Pillow-SIMD (optional but recommended)
-
-A faster drop-in replacement for Pillow that accelerates image operations using CPU vector instructions.
-
-Best for:
-
-* Large image resizing
-* Improving UI responsiveness during scaling
+* **Python 3** – core language
+* **GTK3 (PyGObject)** – GUI framework
+* **Pillow** – image loading and processing
+* **Pillow-SIMD (optional)** – faster image resizing
 
 ---
 
-## Performance Notes
+## Why Pillow-SIMD?
 
-This application supports large images, but extremely high-resolution files (e.g., tens of thousands of pixels per dimension) can still be resource-intensive.
+Pillow-SIMD is a drop-in replacement for Pillow that speeds up operations like resizing.
 
-Key considerations:
+This matters because:
 
-* Large images are fully decoded into memory
-* Resizing very large images can be slow without optimization
-* Pillow-SIMD significantly improves resize performance
-
-For extremely large TIFF files, consider future improvements such as:
-
-* Lazy loading / tiling
-* Using more advanced libraries like libvips
+* Large images (like 40k × 40k) contain billions of pixels
+* Resizing them is the slowest part of rendering
+* SIMD acceleration can make resizing **2×–5× faster**
 
 ---
 
 ## Installation
 
-### 1. Install system dependencies
+### 1. Install system dependencies (Linux)
 
-On Debian/Ubuntu-based systems:
+Debian/Ubuntu:
 
 ```bash
-sudo apt install python3 python3-gi python3-gi-cairo gir1.2-gtk-3.0 python3-pil
+sudo apt update
+sudo apt install python3 python3-gi python3-gi-cairo gir1.2-gtk-3.0
 ```
 
 ---
 
-### 2. (Recommended) Install Pillow-SIMD
+### 2. Clone the repository
 
-Remove the default Pillow:
+```bash
+git clone https://github.com/yourusername/gtk-image-viewer.git
+cd gtk-image-viewer
+```
+
+---
+
+### 3. Install Python dependencies
+
+#### Option A (standard)
+
+```bash
+pip install pillow
+```
+
+#### Option B (recommended – faster)
 
 ```bash
 pip uninstall pillow
-```
-
-Install optimized version:
-
-```bash
 CC="cc -mavx2" pip install --no-cache-dir pillow-simd
-```
-
-If your CPU does not support AVX2, install without the flag:
-
-```bash
-pip install pillow-simd
 ```
 
 ---
 
-### 3. Run the application
+### 4. Run the app
 
 ```bash
 python3 main.py
@@ -107,37 +89,36 @@ python3 main.py
 
 ---
 
-## Project Structure
+## Performance Notes
 
-```
-.
-├── main.py
-├── README.md
-```
+This app can open very large images, but there are some limits:
+
+* Huge TIFF files may use **several GB of RAM**
+* Loading time depends on disk speed and image compression
+* Resizing cost grows with image size
+
+Using Pillow-SIMD improves performance, but for extremely large images (e.g., >1 billion pixels), more advanced approaches may be needed.
 
 ---
 
-## Usage
+## Limitations
 
-1. Launch the program
-2. Click "Open Image"
-3. Select an image file
-4. The image will automatically scale to fit the window
-
-Resizing the window will dynamically adjust the image size.
+* Loads full image into memory (can be heavy for massive files)
+* No zoom/pan yet
+* No GPU acceleration
 
 ---
 
 ## Future Improvements
 
-* Smooth zoom (scroll wheel support)
+* Smooth zoom (scroll wheel)
 * Click-and-drag panning
-* Image centering within the window
-* GPU acceleration
-* Efficient handling of massive images (tiling/streaming)
+* Image centering
+* Better handling of massive images (tiling/streaming)
+* Possible integration with pyvips for huge TIFF support
 
 ---
 
 ## License
 
-This project is open-source and available under the GNU General License.
+MIT License
