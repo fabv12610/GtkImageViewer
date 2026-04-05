@@ -2,6 +2,7 @@ import io
 
 import gi
 import matplotlib
+
 matplotlib.use('GTK3Agg')
 from matplotlib.backends.backend_gtk3agg import FigureCanvasGTK3Agg as FigureCanvas
 from matplotlib.figure import Figure
@@ -17,13 +18,14 @@ Image.MAX_IMAGE_PIXELS = None
 GLib.set_prgname("Gtk Image Viewer")
 GLib.set_application_name("Gtk Image Viewer")
 
+
 class ImageEditor(Gtk.Window):
     def __init__(self):
         super().__init__(title="Python GTK3 Image Editor")
         self.set_default_size(1024, 768)
         self.current_image = None
         self.zoom_factor = 1.0
-
+        self.current_file = None
         self.main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.add(self.main_box)
 
@@ -31,6 +33,7 @@ class ImageEditor(Gtk.Window):
         self.add_accel_group(self.accel_group)
         self.create_menubar()
         self.create_toolbar()
+        self.create_bottom_toolbar()
 
         self.scroll_window = Gtk.ScrolledWindow()
         # Enable automatic scrollbars
@@ -64,6 +67,11 @@ class ImageEditor(Gtk.Window):
         self.event_box.connect("button-release-event", self.on_button_release)
         self.event_box.connect("motion-notify-event", self.on_mouse_motion)
         # ---------------------------------------------------
+
+    def refresh(self):
+        self.update_display()
+        self.update_image_info()
+        self.update_histogram_data()
 
     # --- UI Setup ---
 
@@ -164,7 +172,7 @@ class ImageEditor(Gtk.Window):
             (Gtk.STOCK_ZOOM_100, "Actual Size", self.fit_to_window),
             (None, None, None),
             (Gtk.STOCK_UNDO, "Rotate 90°", self.on_rotate),
-            (Gtk.STOCK_CLOSE, 'Reset',self.reset)
+            (Gtk.STOCK_CLOSE, 'Reset', self.reset)
         ]
 
         for stock, tooltip, action in tools:
@@ -176,6 +184,51 @@ class ImageEditor(Gtk.Window):
                 btn.connect("clicked", action)
                 toolbar.insert(btn, -1)
 
+    def create_bottom_toolbar(self):
+        bottom_toolbar = Gtk.Toolbar()
+        self.main_box.pack_end(bottom_toolbar, False, False, 0)
+
+        # Make it look like a status bar (no buttons)
+        bottom_toolbar.set_style(Gtk.ToolbarStyle.ICONS)
+
+        self.info_label = Gtk.Label()
+        self.info_label.set_xalign(0)  # left align
+
+        item = Gtk.ToolItem()
+        item.set_expand(True)
+        item.add(self.info_label)
+
+        bottom_toolbar.insert(item, -1)
+
+    def update_image_info(self):
+        if self.current_image is None:
+            self.info_label.set_text("No image loaded")
+            return
+
+        import os
+
+        width, height = self.current_image.size
+        zoom_percent = int(self.zoom_factor * 100)
+
+        parts = []
+
+        # Filename
+        if self.current_file:
+            parts.append(os.path.basename(self.current_file))
+
+            # File size
+            try:
+                size_kb = os.path.getsize(self.current_file) // 1024
+                parts.append(f"{size_kb} KB")
+            except:
+                pass
+
+        # Image info
+        parts.append(f"{width}×{height}px")
+        parts.append(self.current_image.mode)
+        parts.append(f"{zoom_percent}%")
+
+        self.info_label.set_text(" | ".join(parts))
     # --- Core Display Logic with ZOOM ---
 
     def pil_to_pixbuf(self, pil_image):
@@ -193,6 +246,9 @@ class ImageEditor(Gtk.Window):
 
     def reset(self, widget):
         self.current_image = None
+        self.current_file = None
+        self.image_widget.clear()
+        self.refresh()
 
     def fit_to_window(self, widget=None, allocation=None):
 
@@ -212,7 +268,7 @@ class ImageEditor(Gtk.Window):
         scale_x = (max_width - 20) / img_width
         scale_y = (max_height - 20) / img_height
         self.zoom_factor = min(scale_x, scale_y)
-        self.update_display()
+        self.refresh()
 
     def update_display(self):
         """Draws the image strictly based on the current self.zoom_factor."""
@@ -246,6 +302,7 @@ class ImageEditor(Gtk.Window):
         )
 
         self.image_widget.set_from_pixbuf(pixbuf)
+
     # --- NEW: Drag & Pan Logic ---
     def on_button_press(self, widget, event):
         if event.button == 1:
@@ -311,11 +368,15 @@ class ImageEditor(Gtk.Window):
                 self.current_image = Image.open(filename).convert("RGB")
                 self.current_image.load()
 
-                self.fit_to_window()  # or whatever redraw method you use
+                self.current_file = filename
+                self.zoom_factor = 1.0
 
+                self.fit_to_window()
+                self.refresh()
             except Exception as e:
                 print("Error loading image:", e)
                 self.current_image = None
+                self.current_file = None
 
         dialog.destroy()
 
@@ -343,7 +404,8 @@ class ImageEditor(Gtk.Window):
         dialog.set_website("https://github.com/fabv12610/GtkImageViewer")
         dialog.set_website_label("Gtk Image Viewer")
         dialog.set_authors(["Fabian Binu"])
-        dialog.set_logo(GdkPixbuf.Pixbuf.new_from_file_at_size("./resources/icon.png", 64, 64)) # Disabled to ensure it runs without the local icon
+        dialog.set_logo(GdkPixbuf.Pixbuf.new_from_file_at_size("./resources/icon.png", 64,
+                                                               64))  # Disabled to ensure it runs without the local icon
         dialog.connect('response', lambda dialog, data: dialog.destroy())
         dialog.show_all()
 
@@ -351,6 +413,12 @@ class ImageEditor(Gtk.Window):
     def on_zoom_in(self, widget):
         self.zoom_factor *= 1.2
         self.update_display()
+        self.update_image_info()
+
+    def on_zoom_out(self, widget):
+        self.zoom_factor *= 0.8
+        self.update_display()
+        self.update_image_info()
 
     def on_scroll(self, widget, event):
         if event.state & Gdk.ModifierType.CONTROL_MASK:
@@ -362,50 +430,42 @@ class ImageEditor(Gtk.Window):
 
         return False
 
-    def on_zoom_out(self, widget):
-        self.zoom_factor *= 0.8
-        self.update_display()
-
     # --- Editing & Transforms ---
     def on_rotate(self, widget):
         if self.current_image:
             self.current_image = self.current_image.rotate(-90, expand=True)
-            self.update_display()
-
+            self.refresh()
     def on_mirror(self, widget):
         if self.current_image:
             self.current_image = ImageOps.mirror(self.current_image)
-            self.update_display()
-
+            self.refresh()
     def on_flip(self, widget):
         if self.current_image:
             self.current_image = ImageOps.flip(self.current_image)
-            self.update_display()
-
+            self.refresh()
     def on_crop(self, widget):
         if self.current_image:
             w, h = self.current_image.size
             self.current_image = self.current_image.crop((w / 4, h / 4, 3 * w / 4, 3 * h / 4))
             self.update_histogram_data()
-            self.update_display()
-
-    def on_resize(self, widget, allocation):
+            self.refresh()
+    def on_resize(self, widget):
         if self.current_image:
             self.update_histogram_data()
-            self.update_display()
+            self.refresh()
 
     # --- Filters ---
     def apply_filter(self, img_filter):
         if self.current_image:
             self.current_image = self.current_image.filter(img_filter)
             self.update_histogram_data()
-            self.update_display()
+            self.refresh()
 
     def on_bw(self, widget):
         if self.current_image:
             self.current_image = self.current_image.convert("L")
             self.update_histogram_data()
-            self.update_display()
+            self.refresh()
 
     def on_invert(self, widget):
         if self.current_image:
@@ -418,27 +478,32 @@ class ImageEditor(Gtk.Window):
             else:
                 self.current_image = ImageOps.invert(self.current_image.convert('RGB'))
             self.update_histogram_data()
-            self.update_display()
+            self.refresh()
 
     def on_blur(self, widget):
         self.apply_filter(ImageFilter.BLUR)
         self.update_histogram_data()
+        self.refresh()
 
     def on_sharpen(self, widget):
         self.apply_filter(ImageFilter.SHARPEN)
         self.update_histogram_data()
+        self.refresh()
 
     def on_edges(self, widget):
         self.apply_filter(ImageFilter.FIND_EDGES)
         self.update_histogram_data()
+        self.refresh()
 
     def on_emboss(self, widget):
         self.apply_filter(ImageFilter.EMBOSS)
         self.update_histogram_data()
+        self.refresh()
 
     def on_contour(self, widget):
         self.apply_filter(ImageFilter.CONTOUR)
         self.update_histogram_data()
+        self.refresh()
 
     # --- Enhancements ---
     def on_enhance(self, mode, factor):
@@ -451,7 +516,7 @@ class ImageEditor(Gtk.Window):
             enhancer = ImageEnhance.Color(self.current_image)
         self.current_image = enhancer.enhance(factor)
         self.update_histogram_data()
-        self.update_display()
+        self.refresh()
 
     # --- Image Info ---
     def exif_info(self, widget):
@@ -634,9 +699,7 @@ class ImageEditor(Gtk.Window):
 
         self.hist_canvas.draw()
 
-
 if __name__ == "__main__":
-
     win = ImageEditor()
     win.connect("destroy", Gtk.main_quit)
     win.show_all()
