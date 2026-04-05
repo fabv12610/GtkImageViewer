@@ -17,10 +17,9 @@ Image.MAX_IMAGE_PIXELS = None
 GLib.set_prgname("Gtk Image Viewer")
 GLib.set_application_name("Gtk Image Viewer")
 
-
 class ImageEditor(Gtk.Window):
     def __init__(self):
-        super().__init__(title="Python GTK3 Ultimate Image Editor")
+        super().__init__(title="Python GTK3 Image Editor")
         self.set_default_size(1024, 768)
         self.current_image = None
         self.zoom_factor = 1.0
@@ -28,6 +27,8 @@ class ImageEditor(Gtk.Window):
         self.main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.add(self.main_box)
 
+        self.accel_group = Gtk.AccelGroup()
+        self.add_accel_group(self.accel_group)
         self.create_menubar()
         self.create_toolbar()
 
@@ -55,9 +56,10 @@ class ImageEditor(Gtk.Window):
         self.event_box.add_events(
             Gdk.EventMask.BUTTON_PRESS_MASK |
             Gdk.EventMask.BUTTON_RELEASE_MASK |
-            Gdk.EventMask.POINTER_MOTION_MASK
+            Gdk.EventMask.POINTER_MOTION_MASK |
+            Gdk.EventMask.SCROLL_MASK
         )
-
+        self.event_box.connect("scroll-event", self.on_scroll)
         self.event_box.connect("button-press-event", self.on_button_press)
         self.event_box.connect("button-release-event", self.on_button_release)
         self.event_box.connect("motion-notify-event", self.on_mouse_motion)
@@ -67,100 +69,86 @@ class ImageEditor(Gtk.Window):
 
     def create_menubar(self):
         menubar = Gtk.MenuBar()
-        # 1. File Menu
-        file_menu = Gtk.Menu()
-        file_item = Gtk.MenuItem(label="File")
-        file_item.set_submenu(file_menu)
 
-        for label, action in [("Open", self.on_open), ("Save", self.on_save), ("Quit", Gtk.main_quit)]:
-            item = Gtk.MenuItem(label=label)
-            if action != Gtk.main_quit:
-                item.connect("activate", action)
-            else:
-                item.connect("activate", action)
-            file_menu.append(item)
+        # Helper to create menu + items
+        def build_menu(title, items):
+            menu = Gtk.Menu()
+            root = Gtk.MenuItem(label=title)
+            root.set_submenu(menu)
 
-        # 2. View (Zoom) Menu
-        view_menu = Gtk.Menu()
-        view_item = Gtk.MenuItem(label="View")
-        view_item.set_submenu(view_menu)
+            for label, callback, accel in items:
+                item = Gtk.MenuItem(label=label)
+                item.connect("activate", callback)
 
-        for label, action in [("Zoom In (+20%)", self.on_zoom_in), ("Zoom Out (-20%)", self.on_zoom_out),
-                              ("Actual Size (100%)", self.fit_to_window)]:
-            item = Gtk.MenuItem(label=label)
-            item.connect("activate", action)
-            view_menu.append(item)
+                if accel:
+                    key, mod = Gtk.accelerator_parse(accel)
+                    item.add_accelerator(
+                        "activate",
+                        self.accel_group,
+                        key,
+                        mod,
+                        Gtk.AccelFlags.VISIBLE
+                    )
 
-        # 3. Edit (Transform) Menu
-        edit_menu = Gtk.Menu()
-        edit_item = Gtk.MenuItem(label="Edit")
-        edit_item.set_submenu(edit_menu)
+                menu.append(item)
 
-        for label, action in [("Rotate 90°", self.on_rotate), ("Flip Horizontal (Mirror)", self.on_mirror),
-                              ("Flip Vertical", self.on_flip), ("Resize...", self.on_resize),
-                              ("Crop Center 50%", self.on_crop)]:
-            item = Gtk.MenuItem(label=label)
-            item.connect("activate", action)
-            edit_menu.append(item)
+            return root
 
-        # 4. Filter Menu
-        filter_menu = Gtk.Menu()
-        filter_item = Gtk.MenuItem(label="Filters")
-        filter_item.set_submenu(filter_menu)
+        # --- Menu definitions ---
+        menus = [
+            ("File", [
+                ("Open", self.on_open, "<Control>o"),
+                ("Save", self.on_save, "<Control>s"),
+                ("Quit", Gtk.main_quit, "<Control>q"),
+            ]),
 
-        for label, action in [("Convert to B&W", self.on_bw), ("Blur", self.on_blur), ("Sharpen", self.on_sharpen),
-                              ("Find Edges", self.on_edges), ("Emboss", self.on_emboss), ("Contour", self.on_contour),
-                              ("Invert Colors", self.on_invert)]:
-            item = Gtk.MenuItem(label=label)
-            item.connect("activate", action)
-            filter_menu.append(item)
+            ("View", [
+                ("Zoom In (+20%)", self.on_zoom_in, "<Control>equal"),
+                ("Zoom Out (-20%)", self.on_zoom_out, "<Control>minus"),
+                ("Actual Size (100%)", self.fit_to_window, "<Control>0"),
+            ]),
 
-        # 5. Enhance Menu
-        enhance_menu = Gtk.Menu()
-        enhance_item = Gtk.MenuItem(label="Enhance")
-        enhance_item.set_submenu(enhance_menu)
+            ("Edit", [
+                ("Rotate 90°", self.on_rotate, None),
+                ("Flip Horizontal (Mirror)", self.on_mirror, None),
+                ("Flip Vertical", self.on_flip, None),
+                ("Resize...", self.on_resize, None),
+                ("Crop Center 50%", self.on_crop, None),
+            ]),
 
-        for label, action in [("Brightness +20%", lambda x: self.on_enhance('brightness', 1.2)),
-                              ("Brightness -20%", lambda x: self.on_enhance('brightness', 0.8)),
-                              ("Contrast +20%", lambda x: self.on_enhance('contrast', 1.2)),
-                              ("Contrast -20%", lambda x: self.on_enhance('contrast', 0.8)),
-                              ("Color +20%", lambda x: self.on_enhance('color', 1.2)),
-                              ("Color -20%", lambda x: self.on_enhance('color', 0.8))]:
-            item = Gtk.MenuItem(label=label)
-            item.connect("activate", action)
-            enhance_menu.append(item)
+            ("Filters", [
+                ("Convert to B&W", self.on_bw, None),
+                ("Blur", self.on_blur, None),
+                ("Sharpen", self.on_sharpen, None),
+                ("Find Edges", self.on_edges, None),
+                ("Emboss", self.on_emboss, None),
+                ("Contour", self.on_contour, None),
+                ("Invert Colors", self.on_invert, None),
+            ]),
 
-        #6. Info Menu
-        info_menu = Gtk.Menu()
-        info_item = Gtk.MenuItem(label='Info')
-        info_item.set_submenu(info_menu)
+            ("Enhance", [
+                ("Brightness +20%", lambda w: self.on_enhance('brightness', 1.2), None),
+                ("Brightness -20%", lambda w: self.on_enhance('brightness', 0.8), None),
+                ("Contrast +20%", lambda w: self.on_enhance('contrast', 1.2), None),
+                ("Contrast -20%", lambda w: self.on_enhance('contrast', 0.8), None),
+                ("Color +20%", lambda w: self.on_enhance('color', 1.2), None),
+                ("Color -20%", lambda w: self.on_enhance('color', 0.8), None),
+            ]),
 
-        exif_info = Gtk.MenuItem(label="Exif Info")
-        exif_info.connect('activate', self.exif_info)
+            ("Info", [
+                ("Exif Info", self.exif_info, None),
+                ("Histogram Info", self.histogram, None),
+            ]),
 
-        hist_info = Gtk.MenuItem(label='Histogram Info')
-        hist_info.connect('activate', self.histogram)
+            ("About", [
+                ("About", self.on_about, None),
+            ]),
+        ]
 
-        info_menu.append(exif_info)
-        info_menu.append(hist_info)
+        # --- Build everything ---
+        for title, items in menus:
+            menubar.append(build_menu(title, items))
 
-        # 7. About Menu
-        about_menu = Gtk.Menu()
-        about_item = Gtk.MenuItem(label='About')
-        about_item.set_submenu(about_menu)
-
-        about = Gtk.MenuItem(label="About")
-        about.connect('activate', self.on_about)
-        about_menu.append(about)
-
-        # Adding to Menu
-        menubar.append(file_item)
-        menubar.append(view_item)
-        menubar.append(edit_item)
-        menubar.append(filter_item)
-        menubar.append(enhance_item)
-        menubar.append(info_item)
-        menubar.append(about_item)
         self.main_box.pack_start(menubar, False, False, 0)
 
     def create_toolbar(self):
@@ -175,7 +163,8 @@ class ImageEditor(Gtk.Window):
             (Gtk.STOCK_ZOOM_OUT, "Zoom Out", self.on_zoom_out),
             (Gtk.STOCK_ZOOM_100, "Actual Size", self.fit_to_window),
             (None, None, None),
-            (Gtk.STOCK_UNDO, "Rotate 90°", self.on_rotate)
+            (Gtk.STOCK_UNDO, "Rotate 90°", self.on_rotate),
+            (Gtk.STOCK_CLOSE, 'Reset',self.reset)
         ]
 
         for stock, tooltip, action in tools:
@@ -201,6 +190,9 @@ class ImageEditor(Gtk.Window):
         loader.close()
 
         return loader.get_pixbuf()
+
+    def reset(self, widget):
+        self.current_image = None
 
     def fit_to_window(self, widget=None, allocation=None):
 
@@ -307,16 +299,23 @@ class ImageEditor(Gtk.Window):
             Gtk.STOCK_OPEN, Gtk.ResponseType.OK
         )
 
-        if dialog.run() == Gtk.ResponseType.OK:
-            self.current_image = Image.open(dialog.get_filename())
+        response = dialog.run()
 
-            # Ensure compatible mode
-            if self.current_image.mode not in ("RGB", "RGBA"):
-                self.current_image = self.current_image.convert("RGB")
+        if response == Gtk.ResponseType.OK:
+            filename = dialog.get_filename()
 
-            # Fit to window first, THEN update display
-            self.fit_to_window()
-            self.update_display()
+            try:
+                if self.current_image:
+                    self.current_image.close()
+
+                self.current_image = Image.open(filename).convert("RGB")
+                self.current_image.load()
+
+                self.fit_to_window()  # or whatever redraw method you use
+
+            except Exception as e:
+                print("Error loading image:", e)
+                self.current_image = None
 
         dialog.destroy()
 
@@ -352,6 +351,16 @@ class ImageEditor(Gtk.Window):
     def on_zoom_in(self, widget):
         self.zoom_factor *= 1.2
         self.update_display()
+
+    def on_scroll(self, widget, event):
+        if event.state & Gdk.ModifierType.CONTROL_MASK:
+            if event.direction == Gdk.ScrollDirection.UP:
+                self.on_zoom_in(None)
+            elif event.direction == Gdk.ScrollDirection.DOWN:
+                self.on_zoom_out(None)
+            return True
+
+        return False
 
     def on_zoom_out(self, widget):
         self.zoom_factor *= 0.8
